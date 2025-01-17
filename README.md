@@ -31,7 +31,7 @@
 2. **Установите зависимости:**
    ```bash
    pip install -r requirements.txt
-3. **Создайте файл .env и добавьте в него токен бота и ID чата:**
+3. **Создайте файл `.env` и добавьте в него токен бота и ID чата:**
    ```plaintext
    TELEGRAM_BOT_TOKEN=ваш_токен
    TELEGRAM_CHAT_ID=ваш_chat_id
