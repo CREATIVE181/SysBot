@@ -27,17 +27,17 @@
 1. **Клонируйте репозиторий:**
    ```bash
    git clone https://github.com/ваш-репозиторий.git
-   cd ваш-репозиторий```
+   cd ваш-репозиторий
 2. **Установите зависимости:**
    ```bash
-   pip install -r requirements.txt```
+   pip install -r requirements.txt
 3. **Создайте файл .env и добавьте в него токен бота и ID чата:**
    ```plaintext
    TELEGRAM_BOT_TOKEN=ваш_токен
-   TELEGRAM_CHAT_ID=ваш_chat_id```
+   TELEGRAM_CHAT_ID=ваш_chat_id
 4. **Запустите бота:**
    ```bash
-   python main.py```
+   python main.py
    
 ## Использование
 
