@@ -4,22 +4,38 @@ import logging
 import subprocess
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, File
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.getenv("TOKEN")
+USER_ID = os.getenv("USER_ID")
 
-if not TOKEN or not CHAT_ID:
-    raise ValueError("Токен или ID чата не найдены в .env файле.")
+if not TOKEN or not USER_ID:
+    raise ValueError("Токен или ID пользователя не найдены в .env файле.")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log"),  # Логи в файл
+        logging.StreamHandler()  # Логи в консоль
+    ]
+)
+
+# Глобальная переменная для хранения текущей директории
+current_directory = os.getcwd()
+
+# Создаем папку Downloads, если её нет
+downloads_dir = os.path.join(current_directory, "Downloads")
+os.makedirs(downloads_dir, exist_ok=True)
 
 def get_cpu_temperature():
     try:
@@ -35,14 +51,28 @@ def get_cpu_temperature():
     return None
 
 def execute_command(command):
+    global current_directory
+
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True
-        )
-        return result.stdout or result.stderr
+        # Если команда начинается с "cd", обновляем текущую директорию
+        if command.startswith("cd "):
+            new_dir = command.split(" ", 1)[1].strip()
+            try:
+                os.chdir(new_dir)
+                current_directory = os.getcwd()
+                return f"Текущая директория изменена на: {current_directory}"
+            except Exception as e:
+                return f"Ошибка при смене директории: {e}"
+        else:
+            # Выполняем команду в текущей директории
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=current_directory
+            )
+            return result.stdout or result.stderr
     except Exception as e:
         logging.error(f"Ошибка при выполнении команды: {e}")
         return f"Ошибка: {e}"
@@ -64,14 +94,22 @@ async def check_critical_events():
         warnings.append("⚠️ <b>Внимание!</b> Температура CPU превышает 80°C.")
 
     for warning in warnings:
-        await bot.send_message(chat_id=CHAT_ID, text=warning, parse_mode=ParseMode.HTML)
+        await bot.send_message(chat_id=USER_ID, text=warning, parse_mode=ParseMode.HTML)
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /start")
     await message.answer("Привет! Я бот для мониторинга сервера. Используй /help для списка команд.")
 
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /help")
     help_text = (
         f"📋 <b>Список команд:</b>\n"
         f"/start - Начать работу с ботом\n"
@@ -81,12 +119,20 @@ async def cmd_help(message: Message):
         f"/top - Показать топ процессов\n"
         f"/netstat - Показать активные сетевые соединения\n"
         f"/traffic - Показать трафик\n"
-        f"/ssh &lt;add|remove&gt; &lt;публичный_ключ&gt; - Управление SSH-ключами"
+        f"/ssh &lt;add|remove&gt; &lt;публичный_ключ&gt; - Управление SSH-ключами\n"
+        f"/file - Загрузить файл на сервер\n"
+        f"/reboot - Перезагрузить сервер\n"
+        f"/logs - Показать логи сервера\n"
+        f"/sysinfo - Показать информацию о системе"
     )
     await message.answer(help_text, parse_mode=ParseMode.HTML)
 
 @dp.message(Command("status"))
 async def cmd_status(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /status")
     cpu_usage = psutil.cpu_percent(interval=1)
     ram_usage = psutil.virtual_memory().percent
     disk_usage = psutil.disk_usage('/').percent
@@ -108,8 +154,8 @@ async def cmd_status(message: Message):
 
 @dp.message(Command("c"))
 async def cmd_execute(message: Message):
-    if str(message.from_user.id) != CHAT_ID:
-        await message.answer("❌ У вас нет прав для выполнения команд.")
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
         return
 
     command = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
@@ -117,11 +163,16 @@ async def cmd_execute(message: Message):
         await message.answer("❌ Укажите команду для выполнения.")
         return
 
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду: {command}")
     result = execute_command(command)
     await message.answer(f"✅ Результат выполнения команды:\n<pre>{result}</pre>", parse_mode=ParseMode.HTML)
 
 @dp.message(Command("top"))
 async def cmd_top(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /top")
     try:
         processes = sorted(
             psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']),
@@ -138,6 +189,10 @@ async def cmd_top(message: Message):
 
 @dp.message(Command("netstat"))
 async def cmd_netstat(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /netstat")
     try:
         result = subprocess.run("netstat -tuln", shell=True, capture_output=True, text=True)
         output = result.stdout or result.stderr
@@ -148,12 +203,17 @@ async def cmd_netstat(message: Message):
 
 @dp.message(Command("ssh"))
 async def cmd_ssh(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         await message.answer("❌ Используйте: /ssh <add|remove> <публичный_ключ>", parse_mode=ParseMode.HTML)
         return
 
     action, key = args[1], args[2]
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /ssh {action}")
     try:
         if action == "add":
             with open("/root/.ssh/authorized_keys", "a") as f:
@@ -175,6 +235,10 @@ async def cmd_ssh(message: Message):
 
 @dp.message(Command("traffic"))
 async def cmd_traffic(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /traffic")
     try:
         result = subprocess.run("vnstat", shell=True, capture_output=True, text=True)
         output = result.stdout if result.stdout else result.stderr
@@ -183,10 +247,103 @@ async def cmd_traffic(message: Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка:\n<pre>{str(e)}</pre>", parse_mode=ParseMode.HTML)
 
+@dp.message(Command("file"))
+async def cmd_file(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+
+    if not message.document and not message.photo:
+        await message.answer("❌ Файлы не прикреплены.")
+        return
+
+    # Обработка нескольких файлов
+    files = []
+    if message.document:
+        files.extend(message.document)  # Добавляем все документы
+    if message.photo:
+        files.append(message.photo[-1])  # Добавляем фото (самое высокое качество)
+
+    success_files = []
+    failed_files = []
+
+    for file in files:
+        # Генерируем уникальное имя файла
+        timestamp = int(time.time())
+        if hasattr(file, 'file_name'):
+            file_name = f"{timestamp}_{file.file_name}"  # Добавляем timestamp к имени
+        else:
+            file_name = f"photo_{timestamp}_{file.file_id}.jpg"  # Для фото
+
+        file_path = os.path.join(downloads_dir, file_name)
+
+        try:
+            await bot.download(file, destination=file_path)
+            success_files.append(file_name)
+        except Exception as e:
+            failed_files.append((file_name, str(e)))
+
+    # Формируем ответ
+    response = []
+    if success_files:
+        response.append(f"✅ Успешно загружены файлы:\n<pre>{', '.join(success_files)}</pre>")
+    if failed_files:
+        failed_messages = [f"{name}: {error}" for name, error in failed_files]
+        response.append(f"❌ Ошибка при загрузке файлов:\n<pre>{', '.join(failed_messages)}</pre>")
+
+    await message.answer("\n".join(response), parse_mode=ParseMode.HTML)
+
+@dp.message(Command("reboot"))
+async def cmd_reboot(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /reboot")
+    try:
+        await message.answer("🔄 Сервер перезагружается...")
+        subprocess.run("sudo reboot", shell=True, check=True)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при перезагрузке сервера:\n<pre>{str(e)}</pre>", parse_mode=ParseMode.HTML)
+
+@dp.message(Command("logs"))
+async def cmd_logs(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /logs")
+    try:
+        with open("bot.log", "r") as log_file:
+            logs = log_file.readlines()[-10:]  # Последние 10 строк логов
+            logs = "".join(logs)
+            await message.answer(f"📜 <b>Последние логи:</b>\n<pre>{logs}</pre>", parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при чтении логов:\n<pre>{str(e)}</pre>", parse_mode=ParseMode.HTML)
+
+@dp.message(Command("sysinfo"))
+async def cmd_sysinfo(message: Message):
+    if str(message.from_user.id) != USER_ID:
+        await message.answer("❌ У вас нет прав для использования этого бота.")
+        return
+    logging.info(f"Пользователь {message.from_user.id} выполнил команду /sysinfo")
+    try:
+        hostname = os.uname().nodename
+        os_info = os.uname().sysname + " " + os.uname().release
+        cpu_count = os.cpu_count()
+
+        sysinfo_message = (
+            "📊 <b>Информация о системе:</b>\n"
+            f"• <b>Имя хоста:</b> {hostname}\n"
+            f"• <b>ОС:</b> {os_info}\n"
+            f"• <b>Количество ядер CPU:</b> {cpu_count}\n"
+        )
+
+        await message.answer(sysinfo_message, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка:\n<pre>{str(e)}</pre>", parse_mode=ParseMode.HTML)
+
 async def main():
     logging.info("Бот запущен.")
     await dp.start_polling(bot)
-
 
 if __name__ == '__main__':
     try:
